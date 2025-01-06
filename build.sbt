@@ -6,6 +6,7 @@ ThisBuild / organizationName := "example"
 lazy val zioVersion = "2.1.6"
 lazy val zioKafkaVersion = "2.8.0"
 lazy val zioJsonVersion = "0.6.2"
+val zioHttpVersion = "3.0.1"
 
 lazy val root = (project in file("."))
   .settings(
@@ -15,6 +16,7 @@ lazy val root = (project in file("."))
       "dev.zio" %% "zio-streams" % zioVersion,
       "dev.zio" %% "zio-kafka" % zioKafkaVersion,
       "dev.zio" %% "zio-json" % zioJsonVersion,
+      "dev.zio" %% "zio-http" % zioHttpVersion,
       "dev.zio" %% "zio-test" % zioVersion % Test,
       "dev.zio" %% "zio-test-sbt" % zioVersion % Test
     ),

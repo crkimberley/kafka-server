@@ -13,11 +13,15 @@ import com.chriskimberley.kafkaserver.config.KafkaConfig
 
 trait ProducerService {
   def produce(producerRecord: ProducerRecord[String, String]): Task[Unit]
+  def setupTopic: Task[Boolean]
 }
 
 object ProducerService {
   def produce(producerRecord: ProducerRecord[String, String]): RIO[ProducerService, Unit] =
     ZIO.serviceWithZIO[ProducerService](_.produce(producerRecord))
+
+  def setupTopic: RIO[ProducerService, Boolean] =
+    ZIO.serviceWithZIO[ProducerService](_.setupTopic)
 }
 
 case class ProducerServiceImpl(
@@ -26,20 +30,41 @@ case class ProducerServiceImpl(
 ) extends ProducerService {
   override def produce(producerRecord: ProducerRecord[String, String]): Task[Unit] =
     ZIO.attempt(producer.send(producerRecord).get())
+
+  override def setupTopic: Task[Boolean] = {
+    def createAdminClient = ZIO.attempt {
+      val adminProperties = new Properties()
+      adminProperties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, config.bootstrapServers)
+      AdminClient.create(adminProperties)
+    }
+
+    def topicExists(admin: AdminClient, topicName: String) = ZIO.attempt {
+      admin.listTopics().names().get().asScala.contains(topicName)
+    }
+
+    def createTopic(admin: AdminClient) = ZIO.attempt {
+      val newTopic = NewTopic(
+        config.topicName,
+        config.partitionCount,
+        config.replicationFactor
+      )
+      admin.createTopics(List(newTopic).asJava).all().get()
+    }
+
+    ZIO.scoped {
+      ZIO
+        .acquireRelease(createAdminClient)(admin => ZIO.attempt(admin.close()).ignoreLogged)
+        .flatMap { admin =>
+          for {
+            exists <- topicExists(admin, config.topicName)
+            _ <- ZIO.unless(exists)(createTopic(admin))
+          } yield exists
+        }
+    }
+  }
 }
 
 object ProducerServiceImpl {
-  private def setupTopic(config: KafkaConfig): Task[Unit] = ZIO.attempt {
-    val adminProperties = new Properties()
-    adminProperties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, config.bootstrapServers)
-
-    val admin = AdminClient.create(adminProperties)
-    try
-      val newTopic = NewTopic(config.topicName, config.partitionCount, 1.toShort)
-      admin.createTopics(List(newTopic).asJava).all().get()
-    finally admin.close()
-  }
-
   private def createProducerProperties(config: KafkaConfig): Properties = {
     val properties = new Properties()
     properties.put(
@@ -60,7 +85,6 @@ object ProducerServiceImpl {
   def layer(config: KafkaConfig): TaskLayer[ProducerServiceImpl] =
     ZLayer.scoped {
       for {
-        _ <- setupTopic(config).orDie
         producer <- ZIO.acquireRelease(
                       ZIO.attempt(KafkaProducer[String, String](createProducerProperties(config)))
                     )(p => ZIO.attempt(p.close()).ignoreLogged)

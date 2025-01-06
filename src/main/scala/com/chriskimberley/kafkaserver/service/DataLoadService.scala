@@ -54,6 +54,7 @@ case class DataLoadServiceImpl(config: KafkaConfig) extends DataLoadService {
                            extractKey(json)
                              .map(ProducerRecord[String, String](config.topicName, _, json.toString()))
                          }
+      _ <- ZIO.logInfo(s"${producerRecords.size} ProducerRecords constructed from local file")
     } yield producerRecords
 }
 
